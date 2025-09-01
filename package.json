@@ -1,0 +1,16 @@
+{
+  "name": "mission-buddy",
+  "version": "1.0.0",
+  "description": "Random mission overlay companion",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "devDependencies": {
+    "electron": "^27.0.0"
+  },
+  "keywords": ["electron", "overlay", "mission", "productivity"],
+  "author": "Your Name",
+  "license": "MIT"
+}

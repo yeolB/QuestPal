@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mission Buddy</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="character-container" id="characterContainer">
+            <div class="speech-bubble" id="speechBubble">
+                <p id="missionText">안녕하세요! 새로운 미션을 준비했어요! 🌟</p>
+                <div class="timer-display" id="timerDisplay">
+                    <span id="timerText"></span>
+                </div>
+            </div>
+            <div class="character" id="character">
+                <span class="emoji-fallback">🎯</span>
+            </div>
+            <div class="buttons">
+                <button class="btn complete" onclick="completeMission()">완료!</button>
+                <button class="btn skip" onclick="skipMission()">다음에</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="missions.js"></script>
+    <script src="character.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
