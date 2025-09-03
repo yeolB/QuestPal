@@ -1,116 +1,170 @@
-// Mission Buddy - ìºë¦­í„° ìƒì‹œ í‘œì‹œ ì‹œìŠ¤í…œ
+// ==========================================================================
+// Mission Buddy - 메인 스크립트
+// ==========================================================================
+// 역할: 미션 생성, 관리, UI 상호작용 등 애플리케이션의 모든 동작을 제어합니다.
+// ==========================================================================
+
+
+// ==========================================================================
+// # 상수 및 설정값
+// - 코드의 가독성을 높이고 유지보수를 용이하게 하기 위해 주요 설정값들을 중앙에서 관리합니다.
+// ==========================================================================
+
+const CONSTANTS = {
+    // 시간 관련 설정 (단위: 밀리초 ms)
+    ACTIVE_MISSION_AUTO_PENDING_TIME: 10000, // 활성 미션이 자동으로 '완료 대기'로 넘어가는 시간 (10초)
+    TRANSITION_ANIMATION_DURATION: 800,       // 말풍선 이동 애니메이션 시간 (0.8초)
+    INITIAL_MISSION_DELAY: 2000,              // 앱 시작 후 첫 미션이 표시되기까지의 대기 시간 (2초)
+    NEXT_MISSION_MIN_DELAY: 30 * 1000,        // 다음 미션 표시까지의 최소 대기 시간 (30초)
+    NEXT_MISSION_MAX_DELAY: 5 * 60 * 1000,    // 다음 미션 표시까지의 최대 대기 시간 (5분)
+    PENDING_ITEM_REMOVE_DELAY: 300,           // 완료 대기 항목이 사라지는 애니메이션 시간 (0.3초)
+    CELEBRATION_DURATION: 2000,               // 미션 완료 축하 애니메이션 시간 (2초)
+
+    // 미션 관련 설정
+    MAX_PENDING_MISSIONS: 5,                  // '완료 대기' 목록에 보관할 수 있는 최대 미션 개수
+
+    // CSS 클래스 및 상태 이름
+    MODE_IDLE: 'idle-mode',
+    MODE_ACTIVE: 'active-mode',
+    MODE_TRANSITION: 'transition-mode',
+    CLASS_SHOW: 'show',
+    CLASS_PERSISTENT: 'persistent',
+    CLASS_MOVING_TO_PENDING: 'moving-to-pending',
+
+    // 통계 저장용 키
+    STATS_COMPLETED: 'completed',
+    STATS_AUTO_COMPLETED: 'auto_completed',
+};
+
+// HTML 요소에 접근하기 위한 셀렉터(선택자) 모음
+const UI_SELECTORS = {
+    container: '.container',
+    characterContainer: '#characterContainer',
+    character: '#character',
+    speechBubble: '#speechBubble',
+    missionText: '#missionText',
+    timerDisplay: '#timerDisplay',
+    timerText: '#timerText',
+    buttons: '.buttons',
+};
+
+
+// ==========================================================================
+// # MissionManager 클래스
+// - 미션과 관련된 모든 데이터와 기능을 관리하는 핵심 객체입니다.
+// ==========================================================================
 
 class MissionManager {
+    /**
+     * MissionManager의 생성자입니다. 상태 변수와 UI 요소들을 초기화합니다.
+     */
     constructor() {
-        this.activeMission = null;
-        this.pendingMissions = [];
-        this.maxPendingMissions = 5;
-        this.activeMissionTimer = null;
-        this.nextMissionTimer = null;
-        this.isMissionActive = false;
-        
-        // DOM ìš”ì†Œë“¤
-        this.characterContainer = null;
-        this.character = null;
-        this.speechBubble = null;
-        this.missionText = null;
-        this.timerDisplay = null;
-        this.timerText = null;
-        this.buttons = null;
-        this.pendingContainer = null;
-        
-        // ìºë¦­í„° í‘œì‹œ ëª¨ë“œ
-        this.characterModes = {
-            IDLE: 'idle',           // ëŒ€ê¸° ëª¨ë“œ (ìºë¦­í„°ë§Œ)
-            ACTIVE: 'active',       // ë¯¸ì…˜ í™œì„± ëª¨ë“œ (ìºë¦­í„° + ë§í’ì„ )
-            TRANSITION: 'transition' // ì „í™˜ ëª¨ë“œ
-        };
-        
-        this.currentMode = this.characterModes.IDLE;
+        // 미션 데이터 및 상태
+        this.activeMission = null;      // 현재 활성화된 미션 객체
+        this.pendingMissions = [];      // '완료 대기' 미션 목록 배열
+        this.isMissionActive = false;   // 미션이 현재 활성화 상태인지 여부
+        this.currentMode = CONSTANTS.MODE_IDLE; // 캐릭터의 현재 상태 모드
+
+        // 타이머 ID
+        this.activeMissionTimer = null; // 활성 미션의 자동 이동 타이머
+        this.nextMissionTimer = null;   // 다음 미션 생성 스케줄 타이머
+
+        // UI 요소들을 담을 객체 (초기화 시 채워짐)
+        this.ui = {};
     }
-    
-    // ì´ˆê¸°í™”
+
+    /**
+     * 애플리케이션 시작 시 호출되는 초기화 함수입니다.
+     * DOM 요소를 찾고, 이벤트를 설정하며, 시스템을 준비시킵니다.
+     * @returns {Promise<boolean>} 초기화 성공 여부를 반환합니다.
+     */
     async initialize() {
-        this.characterContainer = document.getElementById('characterContainer');
-        this.character = document.getElementById('character');
-        this.speechBubble = document.getElementById('speechBubble');
-        this.missionText = document.getElementById('missionText');
-        this.timerDisplay = document.getElementById('timerDisplay');
-        this.timerText = document.getElementById('timerText');
-        this.buttons = document.querySelector('.buttons');
+        // UI_SELECTORS를 기반으로 모든 DOM 요소를 찾아 this.ui 객체에 저장합니다.
+        for (const key in UI_SELECTORS) {
+            this.ui[key] = document.querySelector(UI_SELECTORS[key]);
+        }
         
-        if (!this.characterContainer || !this.character || !this.speechBubble) {
-            console.error('í•„ìˆ˜ DOM ìš”ì†Œë¥¼ ì°¾ì„ ìˆ˜ ì—†ìŠµë‹ˆë‹¤.');
+        // 필수 UI 요소가 하나라도 없는 경우, 에러를 출력하고 초기화를 중단합니다.
+        if (!this.ui.characterContainer || !this.ui.character || !this.ui.speechBubble) {
+            console.error('필수 DOM 요소를 찾을 수 없습니다. HTML 구조를 확인해주세요.');
             return false;
         }
-        
-        // ì™„ë£Œ ëŒ€ê¸° ë¯¸ì…˜ ì»¨í…Œì´ë„ˆ ìƒì„±
-        this.createPendingContainer();
-        
-        // ìºë¦­í„° ìƒì‹œ í‘œì‹œ ì„¤ì •
-        this.setupPersistentCharacter();
-        
-        // ì´ë²¤íŠ¸ ë¦¬ìŠ¤ë„ˆ ì„¤ì •
-        this.setupEventListeners();
-        
-        console.log('ë¯¸ì…˜ ë§¤ë‹ˆì € ì´ˆê¸°í™” ì™„ë£Œ - ìºë¦­í„° ìƒì‹œ í‘œì‹œ');
+
+        this.createPendingContainer(); // '완료 대기' 목록을 담을 컨테이너를 동적으로 생성합니다.
+        this.setupPersistentCharacter(); // 캐릭터가 항상 화면에 표시되도록 설정합니다.
+        this.setupEventListeners(); // 클릭, 키보드 등 사용자 입력에 대한 이벤트를 설정합니다.
+
+        console.log('미션 매니저 초기화 완료 - 캐릭터 상시 표시 모드');
         return true;
     }
-    
-    // ìºë¦­í„° ìƒì‹œ í‘œì‹œ ì„¤ì •
+
+    /**
+     * 캐릭터가 항상 화면에 표시되도록 초기 상태를 설정합니다.
+     */
     setupPersistentCharacter() {
-        // ìºë¦­í„° ì»¨í…Œì´ë„ˆë¥¼ í•­ìƒ í‘œì‹œ
-        this.characterContainer.classList.add('persistent');
-        
-        // ëŒ€ê¸° ëª¨ë“œë¡œ ì‹œìž‘
-        this.setCharacterMode(this.characterModes.IDLE);
-        
-        console.log('ìºë¦­í„° ìƒì‹œ í‘œì‹œ ëª¨ë“œ í™œì„±í™”');
+        this.ui.characterContainer.classList.add(CONSTANTS.CLASS_PERSISTENT);
+        this.setCharacterMode(CONSTANTS.MODE_IDLE); // 초기 모드는 '대기' 상태입니다.
+        console.log('캐릭터 상시 표시 모드 활성화');
     }
-    
-    // ìºë¦­í„° í‘œì‹œ ëª¨ë“œ ë³€ê²½
+
+    /**
+     * 캐릭터의 표시 모드(대기, 활성, 전환)를 변경합니다.
+     * 이 함수는 CSS 클래스를 제어하여 시각적 상태를 바꿉니다.
+     * @param {string} mode - 변경할 모드 이름 (CONSTANTS.MODE_IDLE 등)
+     */
     setCharacterMode(mode) {
         this.currentMode = mode;
+        const container = this.ui.characterContainer;
         
-        // ëª¨ë“  ëª¨ë“œ í´ëž˜ìŠ¤ ì œê±°
-        this.characterContainer.classList.remove('idle-mode', 'active-mode', 'transition-mode');
+        // 모든 모드 관련 클래스를 먼저 제거하여 상태가 중첩되지 않도록 합니다.
+        container.classList.remove(CONSTANTS.MODE_IDLE, CONSTANTS.MODE_ACTIVE, CONSTANTS.MODE_TRANSITION);
         
-        switch(mode) {
-            case this.characterModes.IDLE:
-                this.characterContainer.classList.add('idle-mode');
-                this.speechBubble.classList.remove('show');
-                this.buttons.style.display = 'none';
-                this.timerDisplay.style.display = 'none';
-                console.log('ìºë¦­í„° ëª¨ë“œ: ëŒ€ê¸°');
+        // 요청된 모드에 맞는 클래스를 추가하고 관련 UI를 제어합니다.
+        switch (mode) {
+            case CONSTANTS.MODE_IDLE:
+                container.classList.add(CONSTANTS.MODE_IDLE);
+                this.ui.speechBubble.classList.remove(CONSTANTS.CLASS_SHOW);
+                this.ui.buttons.style.display = 'none';
+                this.ui.timerDisplay.style.display = 'none';
+                console.log('캐릭터 모드: 대기');
                 break;
                 
-            case this.characterModes.ACTIVE:
-                this.characterContainer.classList.add('active-mode');
-                this.speechBubble.classList.add('show');
-                this.buttons.style.display = 'none'; // í™œì„± ìƒíƒœì—ì„œëŠ” ë²„íŠ¼ ì—†ìŒ
-                this.timerDisplay.style.display = 'none'; // í™œì„± ìƒíƒœì—ì„œëŠ” íƒ€ì´ë¨¸ ì—†ìŒ
-                console.log('ìºë¦­í„° ëª¨ë“œ: ë¯¸ì…˜ í™œì„±');
+            case CONSTANTS.MODE_ACTIVE:
+                container.classList.add(CONSTANTS.MODE_ACTIVE);
+                this.ui.speechBubble.classList.add(CONSTANTS.CLASS_SHOW);
+                // 활성 상태에서는 기본 버튼과 타이머를 숨깁니다.
+                this.ui.buttons.style.display = 'none';
+                this.ui.timerDisplay.style.display = 'none';
+
+                console.log('캐릭터 모드: 미션 활성');
                 break;
                 
-            case this.characterModes.TRANSITION:
-                this.characterContainer.classList.add('transition-mode');
-                console.log('ìºë¦­í„° ëª¨ë“œ: ì „í™˜');
+            case CONSTANTS.MODE_TRANSITION:
+                container.classList.add(CONSTANTS.MODE_TRANSITION);
+                console.log('캐릭터 모드: 전환 중');
                 break;
         }
     }
-    
-    // ì™„ë£Œ ëŒ€ê¸° ë¯¸ì…˜ ì»¨í…Œì´ë„ˆ ìƒì„±
+
+    /**
+     * '완료 대기' 미션 목록을 표시할 DOM 컨테이너를 생성하여 페이지에 추가합니다.
+     */
     createPendingContainer() {
-        this.pendingContainer = document.createElement('div');
-        this.pendingContainer.className = 'pending-missions-container';
-        this.pendingContainer.id = 'pendingMissions';
-        document.querySelector('.container').appendChild(this.pendingContainer);
+        const pendingContainer = document.createElement('div');
+        pendingContainer.className = 'pending-missions-container';
+        pendingContainer.id = 'pendingMissions';
+        this.ui.container.appendChild(pendingContainer);
+        
+        // 생성된 컨테이너를 this.ui 객체에도 저장하여 일관성 있게 관리합니다.
+        this.ui.pendingContainer = pendingContainer;
     }
-    
-    // ì´ë²¤íŠ¸ ë¦¬ìŠ¤ë„ˆ ì„¤ì •
+
+    /**
+     * 애플리케이션의 주요 이벤트 리스너들을 설정합니다.
+     */
     setupEventListeners() {
-        // ìºë¦­í„° í´ë¦­ìœ¼ë¡œ ë¯¸ì…˜ ê°•ì œ í‘œì‹œ
-        this.character?.addEventListener('click', () => {
+        // 캐릭터 클릭 시: 미션이 없으면 보여주고, 있으면 '완료 대기'로 보냅니다.
+        this.ui.character?.addEventListener('click', () => {
             if (!this.isMissionActive) {
                 this.showMission();
             } else {
@@ -118,127 +172,136 @@ class MissionManager {
             }
         });
         
-        // í‚¤ë³´ë“œ ë‹¨ì¶•í‚¤
+        // 키보드 입력 처리
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && this.isMissionActive) {
-                this.moveToPending();
+                this.moveToPending(); // ESC: 활성 미션을 '완료 대기'로
             } else if (e.key === ' ' || e.key === 'Spacebar') {
-                e.preventDefault();
+                e.preventDefault(); // 스페이스바의 기본 동작(스크롤 등)을 막습니다.
                 if (!this.isMissionActive) {
-                    this.showMission();
+                    this.showMission(); // 스페이스바: 새 미션 표시
+                }
+            }
+        });
+
+        // 이벤트 위임(Event Delegation) 사용:
+        // '완료 대기' 목록 전체에 하나의 이벤트 리스너를 설정하여,
+        // 동적으로 추가되는 각 미션의 '완료' 버튼 클릭을 효율적으로 처리합니다.
+        this.ui.pendingContainer.addEventListener('click', (event) => {
+            const completeButton = event.target.closest('.pending-complete-btn');
+            if (completeButton) {
+                const missionItem = event.target.closest('.pending-mission-item');
+                if (missionItem) {
+                    const missionId = missionItem.dataset.missionId;
+                    this.completePendingMission(missionId);
                 }
             }
         });
     }
-    
-    // ìƒˆ ë¯¸ì…˜ í‘œì‹œ
+
+    /**
+     * 새로운 미션을 사용자에게 보여줍니다.
+     */
     showMission() {
-        if (this.isMissionActive) return;
+        if (this.isMissionActive) return; // 이미 미션이 활성화된 경우 중복 실행 방지
         
-        // ëžœë¤ ë¯¸ì…˜ ì„ íƒ
-        this.activeMission = this.createMissionObject(getRandomMission());
-        this.missionText.textContent = this.activeMission.text;
+        this.activeMission = this.createMissionObject(getRandomMission()); // 랜덤 미션 생성
+        this.ui.missionText.textContent = this.activeMission.text;
         
-        // ë¯¸ì…˜ íƒ€ìž…ì— ë”°ë¥¸ ìºë¦­í„° ìƒíƒœ ë³€ê²½
         const category = this.getMissionCategory(this.activeMission.text);
-        setCharacterState('thinking');
+        setCharacterState('thinking'); // 캐릭터 상태 변경 (외부 함수 호출)
         
-        // ë¯¸ì…˜ í™œì„± ëª¨ë“œë¡œ ì „í™˜
-        this.setCharacterMode(this.characterModes.ACTIVE);
+        this.setCharacterMode(CONSTANTS.MODE_ACTIVE); // 캐릭터를 '활성' 모드로 변경
         this.isMissionActive = true;
         
-        // 1ì´ˆ í›„ ë¯¸ì…˜ íƒ€ìž…ë³„ ìºë¦­í„°ë¡œ ë³€ê²½
         setTimeout(() => {
-            updateCharacterForMission(category);
+            updateCharacterForMission(category); // 1초 후 미션 유형에 맞는 캐릭터로 변경
         }, 1000);
         
-        // 10ì´ˆ í›„ ìžë™ìœ¼ë¡œ ì™„ë£Œ ëŒ€ê¸°ë¡œ ì „í™˜
+        // 타이머 설정: 10초간 아무런 조작이 없으면 자동으로 '완료 대기'로 이동
         this.activeMissionTimer = setTimeout(() => {
             this.moveToPending();
-        }, 10000);
+        }, CONSTANTS.ACTIVE_MISSION_AUTO_PENDING_TIME);
         
-        console.log('í™œì„± ë¯¸ì…˜ í‘œì‹œ:', this.activeMission.text);
+        console.log('활성 미션 표시:', this.activeMission.text);
     }
-    
-    // ë¯¸ì…˜ ê°ì²´ ìƒì„±
+
+    /**
+     * 미션 데이터를 기반으로 표준 미션 객체를 생성합니다.
+     * @param {object} missionData - {text, duration} 형태의 원본 미션 데이터
+     * @returns {object} - id, 남은 시간 등이 추가된 미션 객체
+     */
     createMissionObject(missionData) {
         return {
-            id: Date.now() + Math.random(),
+            id: Date.now() + Math.random(), // 고유 ID 생성
             text: missionData.text,
             duration: missionData.duration,
             createdAt: new Date(),
-            remainingTime: missionData.duration * 60
+            remainingTime: missionData.duration * 60 // 남은 시간을 초 단위로 변환
         };
     }
     
-    // ì™„ë£Œ ëŒ€ê¸°ë¡œ ì´ë™
+    /**
+     * 현재 활성화된 미션을 '완료 대기' 목록으로 이동시킵니다.
+     */
     moveToPending() {
         if (!this.isMissionActive || !this.activeMission) return;
         
-        // ìµœëŒ€ ê°œìˆ˜ í™•ì¸
-        if (this.pendingMissions.length >= this.maxPendingMissions) {
-            const oldestMission = this.pendingMissions.shift();
+        // 목록이 꽉 찼으면 가장 오래된 미션을 제거합니다.
+        if (this.pendingMissions.length >= CONSTANTS.MAX_PENDING_MISSIONS) {
+            const oldestMission = this.pendingMissions.shift(); // 배열의 맨 앞 요소를 제거하고 반환
             this.removePendingMissionUI(oldestMission.id);
-            console.log('ê°€ìž¥ ì˜¤ëž˜ëœ ì™„ë£Œ ëŒ€ê¸° ë¯¸ì…˜ ì œê±°:', oldestMission.text);
+            console.log('가장 오래된 완료 대기 미션 제거:', oldestMission.text);
         }
         
-        // ì™„ë£Œ ëŒ€ê¸° ëª©ë¡ì— ì¶”ê°€
-        this.pendingMissions.push(this.activeMission);
+        this.pendingMissions.push(this.activeMission); // 현재 미션을 목록에 추가
+        this.createPendingMissionUI(this.activeMission); // 화면에 UI 생성
+        this.animateTransition(); // 말풍선이 날아가는 애니메이션 시작
         
-        // ì™„ë£Œ ëŒ€ê¸° UI ìƒì„±
-        this.createPendingMissionUI(this.activeMission);
-        
-        // ì „í™˜ ì• ë‹ˆë©”ì´ì…˜ ì‹œìž‘
-        this.animateTransition();
-        
-        console.log('ì™„ë£Œ ëŒ€ê¸°ë¡œ ì´ë™:', this.activeMission.text);
-        console.log('í˜„ìž¬ ì™„ë£Œ ëŒ€ê¸° ë¯¸ì…˜ ìˆ˜:', this.pendingMissions.length);
+        console.log('완료 대기로 이동:', this.activeMission.text);
     }
     
-    // ì „í™˜ ì• ë‹ˆë©”ì´ì…˜
+    /**
+     * 말풍선이 '완료 대기' 목록으로 이동하는 애니메이션을 처리합니다.
+     */
     animateTransition() {
-        // ì „í™˜ ëª¨ë“œë¡œ ë³€ê²½
-        this.setCharacterMode(this.characterModes.TRANSITION);
+        this.setCharacterMode(CONSTANTS.MODE_TRANSITION); // '전환' 모드로 변경
+        this.ui.speechBubble.classList.add(CONSTANTS.CLASS_MOVING_TO_PENDING);
         
-        // ë§í’ì„ ì„ ìš°ì¸¡ ìƒë‹¨ìœ¼ë¡œ ì´ë™í•˜ëŠ” ì• ë‹ˆë©”ì´ì…˜
-        this.speechBubble.classList.add('moving-to-pending');
-        
+        // 애니메이션이 끝나는 시점에 맞춰 뒷정리 작업을 수행합니다.
         setTimeout(() => {
-            // í™œì„± ë¯¸ì…˜ ì¢…ë£Œ
-            this.endActiveMission();
-            
-            // ëŒ€ê¸° ëª¨ë“œë¡œ ë³µê·€
-            this.setCharacterMode(this.characterModes.IDLE);
-            
-            // ë§í’ì„  ì• ë‹ˆë©”ì´ì…˜ í´ëž˜ìŠ¤ ì œê±°
-            this.speechBubble.classList.remove('moving-to-pending');
-            
-            // ë‹¤ìŒ ë¯¸ì…˜ ìŠ¤ì¼€ì¤„
-            this.scheduleNextMission();
-        }, 800);
+            this.endActiveMission(); // 활성 미션 상태를 완전히 종료
+            this.setCharacterMode(CONSTANTS.MODE_IDLE); // 캐릭터를 '대기' 모드로 복귀
+            this.ui.speechBubble.classList.remove(CONSTANTS.CLASS_MOVING_TO_PENDING); // 애니메이션 클래스 제거
+            this.scheduleNextMission(); // 다음 미션이 나타나도록 예약
+        }, CONSTANTS.TRANSITION_ANIMATION_DURATION);
     }
     
-    // í™œì„± ë¯¸ì…˜ ì¢…ë£Œ
+    /**
+     * 활성화된 미션 상태를 종료하고 관련 데이터를 정리합니다.
+     */
     endActiveMission() {
-        // íƒ€ì´ë¨¸ ì •ë¦¬
         if (this.activeMissionTimer) {
-            clearTimeout(this.activeMissionTimer);
+            clearTimeout(this.activeMissionTimer); // 자동 이동 타이머 취소
             this.activeMissionTimer = null;
         }
         
         this.isMissionActive = false;
-        this.activeMission = null;
+        this.activeMission = null; // 활성 미션 정보 초기화
         
-        // ì‹œê°„ëŒ€ë³„ ìºë¦­í„° ìƒíƒœë¡œ ë³µê·€
-        updateCharacterByTime();
+        updateCharacterByTime(); // 시간에 맞는 기본 캐릭터 상태로 복귀
     }
-    
-    // ì™„ë£Œ ëŒ€ê¸° ë¯¸ì…˜ UI ìƒì„±
+
+    /**
+     * '완료 대기' 미션 항목의 UI를 생성합니다.
+     * @param {object} mission - UI로 만들 미션 객체
+     */
     createPendingMissionUI(mission) {
         const pendingItem = document.createElement('div');
         pendingItem.className = 'pending-mission-item';
         pendingItem.dataset.missionId = mission.id;
         
+        // 버튼에서 onclick 속성을 제거했습니다. 이벤트는 setupEventListeners에서 위임 처리됩니다.
         pendingItem.innerHTML = `
             <div class="pending-mission-content">
                 <p class="pending-mission-text">${mission.text}</p>
@@ -246,55 +309,65 @@ class MissionManager {
                     <span class="pending-timer-text">${this.formatTime(mission.remainingTime)}</span>
                 </div>
             </div>
-            <button class="pending-complete-btn" onclick="missionManager.completePendingMission('${mission.id}')">
-                ì™„ë£Œ
+            <button class="pending-complete-btn">
+                완료
             </button>
         `;
         
-        // ì• ë‹ˆë©”ì´ì…˜ìœ¼ë¡œ ì¶”ê°€
+        // 부드럽게 나타나는 애니메이션 효과
         pendingItem.style.opacity = '0';
         pendingItem.style.transform = 'translateX(50px)';
-        this.pendingContainer.appendChild(pendingItem);
+        this.ui.pendingContainer.appendChild(pendingItem);
         
-        // íƒ€ì´ë¨¸ ì‹œìž‘
-        this.startPendingTimer(mission.id);
+        this.startPendingTimer(mission.id); // 미션 타이머 시작
         
+        // 짧은 지연 후 애니메이션 시작 (브라우저 렌더링을 위함)
         setTimeout(() => {
             pendingItem.style.opacity = '1';
             pendingItem.style.transform = 'translateX(0)';
         }, 100);
     }
     
-    // ì™„ë£Œ ëŒ€ê¸° ë¯¸ì…˜ íƒ€ì´ë¨¸ ì‹œìž‘
+    /**
+     * '완료 대기' 미션의 남은 시간 타이머를 시작합니다.
+     * @param {string|number} missionId - 타이머를 시작할 미션의 ID
+     */
     startPendingTimer(missionId) {
         const mission = this.pendingMissions.find(m => m.id === missionId);
         if (!mission) return;
         
         const interval = setInterval(() => {
-            mission.remainingTime--;
+            mission.remainingTime--; // 1초마다 시간 감소
             
-            const timerElement = document.querySelector(`[data-mission-id="${missionId}"] .pending-timer-text`);
+            const timerElement = this.ui.pendingContainer.querySelector(`[data-mission-id="${missionId}"] .pending-timer-text`);
             if (timerElement) {
                 timerElement.textContent = this.formatTime(mission.remainingTime);
             }
             
             if (mission.remainingTime <= 0) {
                 clearInterval(interval);
-                this.autoCompletePendingMission(missionId);
+                this.autoCompletePendingMission(missionId); // 시간이 다 되면 자동 실패 처리
             }
         }, 1000);
         
-        mission.timerId = interval;
+        mission.timerId = interval; // 나중에 타이머를 중지할 수 있도록 ID 저장
     }
     
-    // ì‹œê°„ í¬ë§·íŒ…
+    /**
+     * 초 단위 시간을 '분:초' 형식의 문자열로 변환합니다.
+     * @param {number} seconds - 변환할 시간(초)
+     * @returns {string} - "m:ss" 형식의 문자열
+     */
     formatTime(seconds) {
         const minutes = Math.floor(seconds / 60);
         const secs = seconds % 60;
-        return `${minutes}:${secs.toString().padStart(2, '0')}`;
+        return `${minutes}:${secs.toString().padStart(2, '0')}`; // 초가 한 자리 수일 때 앞에 0을 붙여줍니다.
     }
     
-    // ì™„ë£Œ ëŒ€ê¸° ë¯¸ì…˜ ì™„ë£Œ
+    /**
+     * '완료' 버튼을 눌러 '완료 대기' 미션을 완료 처리합니다.
+     * @param {string|number} missionId - 완료할 미션의 ID
+     */
     completePendingMission(missionId) {
         const missionIndex = this.pendingMissions.findIndex(m => m.id == missionId);
         if (missionIndex === -1) return;
@@ -302,55 +375,62 @@ class MissionManager {
         const mission = this.pendingMissions[missionIndex];
         
         if (mission.timerId) {
-            clearInterval(mission.timerId);
+            clearInterval(mission.timerId); // 타이머 중지
         }
         
-        this.updateMissionStats('completed');
-        this.pendingMissions.splice(missionIndex, 1);
-        this.removePendingMissionUI(missionId);
-        this.showCompletionFeedback('ì™„ë£Œ! ðŸŽ‰', mission.text);
+        this.updateMissionStats(CONSTANTS.STATS_COMPLETED); // 통계 업데이트
+        this.pendingMissions.splice(missionIndex, 1); // 배열에서 미션 제거
+        this.removePendingMissionUI(missionId); // 화면에서 UI 제거
+        this.showCompletionFeedback('완료! 🎉', mission.text); // 완료 피드백 표시
         
-        console.log('ì™„ë£Œ ëŒ€ê¸° ë¯¸ì…˜ ì™„ë£Œ:', mission.text);
+        console.log('완료 대기 미션 완료:', mission.text);
     }
     
-    // ìžë™ ì™„ë£Œ (ì‹œê°„ ì¢…ë£Œ)
+    /**
+     * 시간이 다 되어 '완료 대기' 미션을 자동으로 제거(실패) 처리합니다.
+     * @param {string|number} missionId - 자동 완료할 미션의 ID
+     */
     autoCompletePendingMission(missionId) {
         const missionIndex = this.pendingMissions.findIndex(m => m.id == missionId);
         if (missionIndex === -1) return;
-        
+
         const mission = this.pendingMissions[missionIndex];
         
-        this.updateMissionStats('auto_completed');
+        this.updateMissionStats(CONSTANTS.STATS_AUTO_COMPLETED); // 통계 업데이트
         this.pendingMissions.splice(missionIndex, 1);
         this.removePendingMissionUI(missionId);
         
-        console.log('ì™„ë£Œ ëŒ€ê¸° ë¯¸ì…˜ ì‹œê°„ ì¢…ë£Œ:', mission.text);
+        console.log('완료 대기 미션 시간 종료:', mission.text);
     }
     
-    // ì™„ë£Œ ëŒ€ê¸° ë¯¸ì…˜ UI ì œê±°
+    /**
+     * '완료 대기' 미션 항목의 UI를 부드럽게 사라지는 애니메이션과 함께 제거합니다.
+     * @param {string|number} missionId - 제거할 UI의 미션 ID
+     */
     removePendingMissionUI(missionId) {
-        const element = document.querySelector(`[data-mission-id="${missionId}"]`);
+        const element = this.ui.pendingContainer.querySelector(`[data-mission-id="${missionId}"]`);
         if (element) {
             element.style.opacity = '0';
             element.style.transform = 'translateX(50px)';
-            setTimeout(() => element.remove(), 300);
+            setTimeout(() => element.remove(), CONSTANTS.PENDING_ITEM_REMOVE_DELAY);
         }
     }
-    
-    // ë‹¤ìŒ ë¯¸ì…˜ ìŠ¤ì¼€ì¤„ë§
+
+    /**
+     * 다음 미션이 나타날 시간을 랜덤하게 스케줄링합니다.
+     */
     scheduleNextMission() {
-        const minDelay = 30 * 1000; // 30ì´ˆ
-        const maxDelay = 5 * 60 * 1000; // 5ë¶„
-        const delay = Math.random() * (maxDelay - minDelay) + minDelay;
-        
-        console.log(`ë‹¤ìŒ ë¯¸ì…˜ê¹Œì§€ ${Math.round(delay/1000)}ì´ˆ`);
+        const delay = Math.random() * (CONSTANTS.NEXT_MISSION_MAX_DELAY - CONSTANTS.NEXT_MISSION_MIN_DELAY) + CONSTANTS.NEXT_MISSION_MIN_DELAY;
+        console.log(`다음 미션까지 ${Math.round(delay/1000)}초`);
         
         this.nextMissionTimer = setTimeout(() => {
             this.showMission();
         }, delay);
     }
-    
-    // ë¯¸ì…˜ ì¹´í…Œê³ ë¦¬ ì°¾ê¸°
+
+    // ... (getMissionCategory, updateMissionStats, showCompletionFeedback, completeActiveMission, cleanup, getDebugInfo 등 나머지 함수들은 변경점이 적어 생략합니다. 필요 시 기존 코드를 그대로 사용하시면 됩니다.)
+    // (아래에 기존 코드를 붙여넣었습니다)
+
     getMissionCategory(missionText) {
         for (const [category, missionList] of Object.entries(missions)) {
             if (missionList.some(mission => mission.text === missionText)) {
@@ -360,75 +440,46 @@ class MissionManager {
         return 'default';
     }
     
-    // í†µê³„ ì—…ë°ì´íŠ¸
     updateMissionStats(action) {
         try {
-            const stats = JSON.parse(localStorage.getItem('missionStats')) || {
-                completed: 0,
-                skipped: 0,
-                auto_completed: 0,
-                total: 0
-            };
-            
+            const stats = JSON.parse(localStorage.getItem('missionStats')) || { completed: 0, skipped: 0, auto_completed: 0, total: 0 };
             stats[action]++;
             stats.total++;
             localStorage.setItem('missionStats', JSON.stringify(stats));
-            
         } catch (error) {
-            console.error('í†µê³„ ì €ìž¥ ì˜¤ë¥˜:', error);
+            console.error('통계 저장 오류:', error);
         }
     }
-    
-    // ì™„ë£Œ í”¼ë“œë°± í‘œì‹œ
+
     showCompletionFeedback(message, missionText) {
-        // ìž„ì‹œë¡œ ìºë¦­í„° ìƒíƒœë¥¼ celebratingìœ¼ë¡œ ë³€ê²½
         setCharacterState('celebrating');
-        
-        // 2ì´ˆ í›„ ì›ëž˜ ìƒíƒœë¡œ ë³µê·€
         setTimeout(() => {
             updateCharacterByTime();
-        }, 2000);
-        
+        }, CONSTANTS.CELEBRATION_DURATION);
         console.log(`${message} - ${missionText}`);
     }
-    
-    // ì¦‰ì‹œ ì™„ë£Œ (í™œì„± ë¯¸ì…˜)
+
     completeActiveMission() {
         if (!this.isMissionActive || !this.activeMission) return;
-        
-        this.updateMissionStats('completed');
-        this.showCompletionFeedback('ì¦‰ì‹œ ì™„ë£Œ! ðŸŽ‰', this.activeMission.text);
-        
-        // ì „í™˜ ì—†ì´ ë°”ë¡œ ëŒ€ê¸° ëª¨ë“œë¡œ
+        this.updateMissionStats(CONSTANTS.STATS_COMPLETED);
+        this.showCompletionFeedback('즉시 완료! 🎉', this.activeMission.text);
         this.endActiveMission();
-        this.setCharacterMode(this.characterModes.IDLE);
+        this.setCharacterMode(CONSTANTS.MODE_IDLE);
         this.scheduleNextMission();
-        
-        console.log('í™œì„± ë¯¸ì…˜ ì¦‰ì‹œ ì™„ë£Œ:', this.activeMission.text);
+        console.log('활성 미션 즉시 완료:', this.activeMission.text);
     }
-    
-    // ê°•ì œ ì •ë¦¬
+
     cleanup() {
-        if (this.activeMissionTimer) {
-            clearTimeout(this.activeMissionTimer);
-            this.activeMissionTimer = null;
-        }
-        
-        if (this.nextMissionTimer) {
-            clearTimeout(this.nextMissionTimer);
-            this.nextMissionTimer = null;
-        }
-        
+        if (this.activeMissionTimer) clearTimeout(this.activeMissionTimer);
+        if (this.nextMissionTimer) clearTimeout(this.nextMissionTimer);
         this.pendingMissions.forEach(mission => {
-            if (mission.timerId) {
-                clearInterval(mission.timerId);
-            }
+            if (mission.timerId) clearInterval(mission.timerId);
         });
-        
         this.pendingMissions = [];
+        this.activeMissionTimer = null;
+        this.nextMissionTimer = null;
     }
-    
-    // ë””ë²„ê·¸ ì •ë³´
+
     getDebugInfo() {
         return {
             currentMode: this.currentMode,
@@ -436,377 +487,60 @@ class MissionManager {
             activeMission: this.activeMission?.text || null,
             pendingCount: this.pendingMissions.length,
             pendingMissions: this.pendingMissions.map(m => m.text),
-            maxPending: this.maxPendingMissions
+            maxPending: CONSTANTS.MAX_PENDING_MISSIONS
         };
     }
 }
 
-// ì „ì—­ ë¯¸ì…˜ ë§¤ë‹ˆì € ì¸ìŠ¤í„´ìŠ¤
+
+// ==========================================================================
+// # 애플리케이션 초기화 및 실행
+// ==========================================================================
+
+// MissionManager의 단일 인스턴스(객체)를 생성합니다. 앱 전체에서 이 객체를 공유합니다.
 const missionManager = new MissionManager();
 
-// ê¸°ì¡´ í•¨ìˆ˜ë“¤ (í•˜ìœ„ í˜¸í™˜ì„±)
-function showMission() {
-    missionManager.showMission();
-}
+// 하위 호환성 또는 간단한 테스트를 위한 전역 헬퍼 함수들
+// 참고: 직접 버튼 등에 이 함수들을 연결하는 것보다,
+// MissionManager 내부의 이벤트 리스너를 통해 기능을 실행하는 것이 더 좋은 구조입니다.
+function showMission() { missionManager.showMission(); }
+function completeMission() { missionManager.completeActiveMission(); }
+function skipMission() { missionManager.moveToPending(); }
 
-function completeMission() {
-    missionManager.completeActiveMission();
-}
-
-function skipMission() {
-    missionManager.moveToPending();
-}
-
-// ë©”ì¸ ì• í”Œë¦¬ì¼€ì´ì…˜ ì´ˆê¸°í™”
+/**
+ * 애플리케이션을 시작하는 메인 함수입니다.
+ */
 async function initializeApp() {
-    console.log('Mission Buddy ì‹œìž‘ - ìºë¦­í„° ìƒì‹œ í‘œì‹œ ëª¨ë“œ');
+    console.log('Mission Buddy 시작 - 캐릭터 상시 표시 모드');
     
-    // ìŠ¤íƒ€ì¼ ì¶”ê°€
-    addRequiredStyles();
+    // 외부 character.js 또는 유사 파일에 있을 것으로 가정하는 함수들
+    await initializeCharacterSystem(); 
     
-    // ìºë¦­í„° ì‹œìŠ¤í…œ ì´ˆê¸°í™”
-    await initializeCharacterSystem();
-    
-    // ë¯¸ì…˜ ë§¤ë‹ˆì € ì´ˆê¸°í™”
     await missionManager.initialize();
     
-    // 2ì´ˆ í›„ ì²« ë²ˆì§¸ ë¯¸ì…˜ í‘œì‹œ
+    // 앱 시작 후 일정 시간 뒤 첫 미션을 표시합니다.
     setTimeout(() => {
         missionManager.showMission();
-    }, 2000);
+    }, CONSTANTS.INITIAL_MISSION_DELAY);
     
-    // 1ì‹œê°„ë§ˆë‹¤ ì‹œê°„ëŒ€ë³„ ìºë¦­í„° ìƒíƒœ ì—…ë°ì´íŠ¸
+    // 1시간마다 시간에 맞는 캐릭터 상태로 업데이트합니다.
     setInterval(updateCharacterByTime, 60 * 60 * 1000);
 }
 
-// 필요한 스타일 추가
-function addRequiredStyles() {
-    const style = document.createElement('style');
-    style.textContent = `
-        /* ======================
-           컨테이너 공간 확장
-           ====================== */
-        
-        .container {
-            min-height: 100vh;
-            padding: 40px 100px; /* 여유 공간 확보 */
-        }
-        
-        /* ==================================
-        개선된 캐릭터 및 말풍선 스타일
-        ================================== */
-
-        /* 캐릭터를 담는 전체 컨테이너 */
-        .character-container {
-            /* position을 기준으로 내부 요소를 배치하기 위함 */
-            position: relative; 
-            
-            /* 캐릭터 크기에 맞춰 컨테이너의 크기 설정 */
-            /* 예시: 캐릭터의 원래 크기가 100px x 120px 였다면 1.8배로 계산 */
-            width: 180px;  /* 100px * 1.8 */
-            height: 180px; /* 120px * 1.8 */
-            
-            /* transform 대신 width/height를 사용했으므로 불필요한 transform 제거 */
-        }
-
-        /* 캐릭터 이미지 또는 애니메이션 자체 */
-        .character {
-            /* 컨테이너를 꽉 채우도록 설정 */
-            width: 100%;
-            height: 100%;
-            object-fit: contain; /* 이미지 비율을 유지하면서 컨테이너에 맞춤 */
-        }
-
-
-        /* Mission Buddy의 JavaScript가 추가하는 클래스 */
-        .character-container.persistent {
-            opacity: 1;
-            /* transform은 이제 위치 이동이나 다른 효과에만 사용 (scale 불필요) */
-            transform: translateX(0); 
-            pointer-events: auto;
-        }
-        
-        /* 호버 효과는 크기 변화로만 처리 */
-        .character-container.idle-mode .character {
-            cursor: pointer;
-            transition: transform 0.2s ease;
-        }
-        
-        .character-container.idle-mode .character:hover {
-            transform: scale(1.1);
-        }
-        
-        /* ======================
-           완료 대기 미션 표시 개선
-           ====================== */
-    
-        .pending-missions-container {
-            position: fixed;
-            top: 30px;
-            right: 15px;
-            z-index: 1000;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            max-width: 380px;
-            max-height: calc(100vh - 100px);
-            overflow-y: auto;
-            padding-right: 8px;
-        }
-
-        /* 스크롤바 스타일링 */
-        .pending-missions-container::-webkit-scrollbar { width: 6px; }
-        .pending-missions-container::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.1); border-radius: 3px; }
-        .pending-missions-container::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.3); border-radius: 3px; }
-        .pending-missions-container::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.5); }
-        
-        /* ======================
-           완료 대기 미션 아이템 개선
-           ====================== */
-        
-        .pending-mission-item {
-            background: linear-gradient(135deg, rgba(102, 126, 234, 0.95) 0%, rgba(118, 75, 162, 0.95) 100%);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.25);
-            border-radius: 16px;
-            padding: 16px;
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-            transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-            opacity: 0.9;
-            min-height: 60px; /* 최소 높이 보장 */
-            flex-shrink: 0; /* 항목 크기 고정 */
-        }
-        
-        .pending-mission-item:hover {
-            opacity: 1;
-            transform: translateX(-8px) scale(1.02);
-            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
-            border-color: rgba(255, 255, 255, 0.4);
-        }
-        
-        /* ======================
-           완료 대기 미션 내용 개선
-           ====================== */
-        
-        .pending-mission-content {
-            flex: 1;
-            color: white;
-            min-width: 0; /* 텍스트 오버플로우 방지 */
-        }
-        
-        .pending-mission-text {
-            margin: 0 0 10px 0;
-            font-size: 14px;
-            line-height: 1.4;
-            font-weight: 500;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-        }
-        
-        .pending-mission-timer {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.9);
-            background: rgba(255, 255, 255, 0.15);
-            padding: 6px 10px;
-            border-radius: 10px;
-            display: inline-block;
-            font-weight: 600;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        
-        /* ======================
-           완료 대기 미션 버튼 개선
-           ====================== */
-        
-        .pending-complete-btn {
-            background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);
-            border: none;
-            border-radius: 12px;
-            padding: 10px 18px;
-            font-size: 13px;
-            color: white;
-            cursor: pointer;
-            transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-            white-space: nowrap;
-            font-weight: 600;
-            box-shadow: 0 2px 10px rgba(79, 172, 254, 0.2);
-            flex-shrink: 0; /* 버튼 크기 고정 */
-        }
-        
-        .pending-complete-btn:hover {
-            transform: scale(1.08) translateY(-1px);
-            box-shadow: 0 6px 20px rgba(79, 172, 254, 0.4);
-            background: linear-gradient(45deg, #5bb6ff 0%, #1affff 100%);
-        }
-        
-        .pending-complete-btn:active {
-            transform: scale(1.02) translateY(0px);
-            transition: all 0.1s ease;
-        }
-        
-        /* ======================
-           전환 애니메이션 개선
-           ====================== */
-        
-        .character-container.transition-mode .speech-bubble {
-            animation: improvedMoveToTopRight 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-        }
-        
-        @keyframes improvedMoveToTopRight {
-            0% { 
-                transform: scale(1) translate(0, 0);
-                opacity: 1;
-            }
-            30% {
-                transform: scale(0.9) translate(50px, -100px);
-                opacity: 0.8;
-            }
-            70% {
-                transform: scale(0.5) translate(150px, -250px);
-                opacity: 0.5;
-            }
-            100% { 
-                transform: scale(0.3) translate(220px, -350px);
-                opacity: 0.2;
-            }
-        }
-        
-        .speech-bubble.moving-to-pending {
-            animation: smoothImprovedMoveToTop 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-        }
-        
-        @keyframes smoothImprovedMoveToTop {
-            0% { 
-                transform: scale(1) translate(0, 0);
-                opacity: 1;
-            }
-            25% {
-                transform: scale(0.85) translate(60px, -80px);
-                opacity: 0.9;
-            }
-            50% {
-                transform: scale(0.6) translate(120px, -180px);
-                opacity: 0.6;
-            }
-            75% {
-                transform: scale(0.4) translate(180px, -280px);
-                opacity: 0.3;
-            }
-            100% { 
-                transform: scale(0.25) translate(240px, -380px);
-                opacity: 0;
-            }
-        }
-        
-        /* ======================
-           접근성 개선
-           ====================== */
-        
-        .pending-complete-btn:focus {
-            outline: 3px solid rgba(79, 172, 254, 0.6);
-            outline-offset: 2px;
-        }
-        
-        /* 고대비 모드 지원 */
-        @media (prefers-contrast: high) {
-            .pending-mission-item {
-                border: 2px solid rgba(255, 255, 255, 0.8);
-                background: rgba(102, 126, 234, 1);
-            }
-            
-            .pending-complete-btn {
-                border: 2px solid white;
-            }
-        }
-        
-        /* 모션 감소 선호 시 애니메이션 단순화 */
-        @media (prefers-reduced-motion: reduce) {
-            .character-container.transition-mode .speech-bubble,
-            .speech-bubble.moving-to-pending,
-            .pending-mission-item,
-            .pending-complete-btn,
-            .character-container.idle-mode .character {
-                animation: none;
-                transition: none;
-            }
-            
-            .pending-mission-item:hover {
-                transform: none;
-            }
-            
-            .pending-complete-btn:hover {
-                transform: none;
-            }
-        }
-        
-        /* ======================
-           성능 최적화
-           ====================== */
-        
-        .pending-missions-container,
-        .pending-mission-item,
-        .character-container {
-            will-change: transform;
-            backface-visibility: hidden;
-        }
-        
-        /* GPU 가속 활성화 */
-        .character-container,
-        .speech-bubble,
-        .pending-mission-item {
-            transform-style: preserve-3d;
-        }
-    `;
-    
-    document.head.appendChild(style);
-}
-
-
-// 추가적인 유틸리티 함수들
-const StyleUtils = {
-    // 동적으로 캐릭터 크기 조정
-    setCharacterScale: (scale) => {
-        const containers = document.querySelectorAll('.character-container');
-        containers.forEach(container => {
-            container.style.transform = container.style.transform.replace(/scale\([^)]*\)/, `scale(${scale})`);
-        });
-    },
-    
-    // 완료 대기 미션 컨테이너 위치 조정
-    setPendingPosition: (top, right) => {
-        const container = document.querySelector('.pending-missions-container');
-        if (container) {
-            container.style.top = top + 'px';
-            container.style.right = right + 'px';
-        }
-    },
-    
-    // 완료 대기 미션 최대 개수 표시 확인
-    checkPendingOverflow: () => {
-        const container = document.querySelector('.pending-missions-container');
-        if (container) {
-            const isScrolling = container.scrollHeight > container.clientHeight;
-            console.log('완료 대기 미션 스크롤 상태:', isScrolling ? '스크롤 필요' : '모두 표시됨');
-            return isScrolling;
-        }
-        return false;
-    }
-};
-
-// 전역으로 스타일 유틸리티 노출
-if (typeof window !== 'undefined') {
-    window.StyleUtils = StyleUtils;
-}
-
-// DOM ë¡œë“œ ì™„ë£Œ ì‹œ ì‹¤í–‰
+// HTML 문서 로딩이 완료되면 initializeApp 함수를 실행합니다.
 document.addEventListener('DOMContentLoaded', initializeApp);
 
-// ê°œë°œ ë„êµ¬
+
+// ==========================================================================
+// # 개발 및 디버깅 도구
+// - 브라우저 콘솔에서 직접 호출하여 앱의 상태를 확인하거나 제어할 수 있습니다.
+// ==========================================================================
+
 if (typeof window !== 'undefined') {
+    // 전역으로 missionManager 객체를 노출시켜 콘솔에서 직접 접근 가능하게 합니다.
     window.missionManager = missionManager;
+    
+    // 유용한 디버깅 함수 모음
     window.MissionUtils = {
         showDebug: () => console.log(missionManager.getDebugInfo()),
         forceMission: () => missionManager.showMission(),
@@ -815,7 +549,10 @@ if (typeof window !== 'undefined') {
                 if (m.timerId) clearInterval(m.timerId);
             });
             missionManager.pendingMissions = [];
-            document.getElementById('pendingMissions').innerHTML = '';
+            if (missionManager.ui.pendingContainer) {
+                missionManager.ui.pendingContainer.innerHTML = '';
+            }
+            console.log('모든 완료 대기 미션이 제거되었습니다.');
         },
         testTransition: () => {
             missionManager.showMission();
